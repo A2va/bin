@@ -14,6 +14,7 @@ import (
 
 	"github.com/caarlos0/log"
 	"github.com/cheggaaa/pb"
+	"github.com/gabriel-vasile/mimetype"
 	"github.com/h2non/filetype"
 	"github.com/h2non/filetype/matchers"
 	"github.com/h2non/filetype/types"
@@ -374,7 +375,13 @@ func (f *Filter) processTar(name string, r io.Reader) (*finalFile, error) {
 			if err != nil {
 				return nil, err
 			}
-			tarFiles[header.Name] = bs
+			// application/octet-stream with http.DetectContentType
+			mtype := mimetype.Detect(bs)
+
+			if mtype.Is("application/x-executable") || mtype.Is("application/vnd.microsoft.portable-executable") {
+				log.Debug(mtype.String())
+				tarFiles[header.Name] = bs
+			}
 		}
 	}
 	if len(tarFiles) == 0 {
