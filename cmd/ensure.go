@@ -7,9 +7,8 @@ import (
 	"os"
 
 	"github.com/caarlos0/log"
-	"github.com/fatih/color"
+	"github.com/marcosnils/bin/pkg"
 	"github.com/marcosnils/bin/pkg/config"
-	"github.com/marcosnils/bin/pkg/providers"
 	"github.com/spf13/cobra"
 )
 
@@ -71,33 +70,10 @@ func newEnsureCmd() *ensureCmd {
 					continue
 				}
 
-				p, err := providers.New(binCfg.URL, binCfg.Provider)
+				err = pkg.DoInstall(binCfg.URL, binCfg.Provider, binCfg.Path, binCfg.Version, binCfg.PackagePath, true, false)
 				if err != nil {
 					return err
 				}
-				log.Debugf("Using provider '%s' for '%s'", p.GetID(), binCfg.URL)
-
-				pResult, err := p.Fetch(&providers.FetchOpts{Version: binCfg.Version})
-				if err != nil {
-					return err
-				}
-
-				hash, err := saveToDisk(pResult, ep, true)
-				if err != nil {
-					return fmt.Errorf("error installing binary: %w", err)
-				}
-
-				err = config.UpsertBinary(&config.Binary{
-					RemoteName: pResult.Name,
-					Path:       binCfg.Path,
-					Version:    pResult.Version,
-					Hash:       fmt.Sprintf("%x", hash),
-					URL:        binCfg.URL,
-				})
-				if err != nil {
-					return err
-				}
-				log.Infof("Done ensuring %s to %s", os.ExpandEnv(binCfg.Path), color.GreenString(binCfg.Version))
 			}
 			return nil
 		},
