@@ -3,7 +3,7 @@ module github.com/marcosnils/bin
 go 1.24.4
 
 require (
-	github.com/caarlos0/log v0.5.1
+	github.com/caarlos0/log v0.5.2
 	github.com/cheggaaa/pb v2.0.7+incompatible
 	github.com/coreos/go-semver v0.3.1
 	github.com/docker/docker v28.3.2+incompatible
@@ -17,15 +17,15 @@ require (
 	github.com/yuin/goldmark v1.7.12
 	gitlab.com/gitlab-org/api/client-go v0.137.0
 	golang.org/x/oauth2 v0.30.0
-	golang.org/x/sys v0.34.0
+	golang.org/x/sys v0.35.0
 )
 
 require (
 	github.com/Azure/go-ansiterm v0.0.0-20250102033503-faa5f7b0171c // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
-	github.com/charmbracelet/colorprofile v0.3.1 // indirect
-	github.com/charmbracelet/lipgloss/v2 v2.0.0-beta1 // indirect
-	github.com/charmbracelet/x/ansi v0.9.3 // indirect
+	github.com/charmbracelet/colorprofile v0.3.2 // indirect
+	github.com/charmbracelet/lipgloss/v2 v2.0.0-beta.3 // indirect
+	github.com/charmbracelet/x/ansi v0.10.1 // indirect
 	github.com/charmbracelet/x/cellbuf v0.0.13 // indirect
 	github.com/charmbracelet/x/term v0.2.1 // indirect
 	github.com/containerd/errdefs v1.0.0 // indirect
