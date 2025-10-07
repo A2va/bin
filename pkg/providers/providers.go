@@ -39,7 +39,7 @@ type FetchOpts struct {
 type Provider interface {
 	// Fetch returns the file metadata to retrieve a specific binary given
 	// for a provider
-	Fetch(*FetchOpts) (*File, error)
+	Fetch(*FetchOpts) ([]*File, error)
 	// GetLatestVersion returns the version and the URL of the
 	// latest version for this binary
 	GetLatestVersion() (string, string, error)

@@ -146,6 +146,10 @@ func (f *Filter) FilterAssets(repoName string, as []*Asset) (*FilteredAsset, err
 				gf := &FilteredAsset{RepoName: repoName, Name: a.Name, DisplayName: a.DisplayName, URL: a.URL, score: 0}
 				candidate := a.Name
 				candidateScore := 0
+				if strings.Contains(strings.ToLower(candidate), "bin/") {
+					candidateScore += 10
+					log.Debugf("Candidate %s is in a bin folder. Adding score 20", candidate)
+				}
 				if bstrings.ContainsAny(strings.ToLower(candidate), scoreKeys) &&
 					isSupportedExt(candidate) {
 					for toMatch, score := range scores {
@@ -253,7 +257,7 @@ func SanitizeName(name, version string) string {
 }
 
 // ProcessURL processes a FilteredAsset by uncompressing/unarchiving the URL of the asset.
-func (f *Filter) ProcessURL(gf *FilteredAsset) (*finalFile, error) {
+func (f *Filter) ProcessURL(gf *FilteredAsset) ([]*finalFile, error) {
 	f.name = gf.Name
 	// We're not closing the body here since the caller is in charge of that
 	req, err := http.NewRequest(http.MethodGet, gf.URL, nil)
@@ -289,7 +293,7 @@ func (f *Filter) ProcessURL(gf *FilteredAsset) (*finalFile, error) {
 	return f.processReader(buf)
 }
 
-func (f *Filter) processReader(r io.Reader) (*finalFile, error) {
+func (f *Filter) processReader(r io.Reader) ([]*finalFile, error) {
 	var buf bytes.Buffer
 	tee := io.TeeReader(r, &buf)
 
@@ -300,7 +304,7 @@ func (f *Filter) processReader(r io.Reader) (*finalFile, error) {
 
 	outputFile := io.MultiReader(&buf, r)
 
-	type processorFunc func(repoName string, r io.Reader) (*finalFile, error)
+	type processorFunc func(repoName string, r io.Reader) ([]*finalFile, error)
 	var processor processorFunc
 	switch t {
 	case matchers.TypeGz:
@@ -316,48 +320,47 @@ func (f *Filter) processReader(r io.Reader) (*finalFile, error) {
 	}
 
 	if processor != nil {
-		// log.Debugf("Processing %s file %s with %s", repoName, name, runtime.FuncForPC(reflect.ValueOf(processor).Pointer()).Name())
-		outFile, err := processor(f.repoName, outputFile)
+		outFiles, err := processor(f.repoName, outputFile)
 		if err != nil {
 			return nil, err
 		}
 
-		outputFile = outFile.Source
-
-		f.name = outFile.Name
-		f.packagePath = outFile.PackagePath
-
-		// In case of e.g. a .tar.gz, process the uncompressed archive by calling recursively
-		return f.processReader(outputFile)
+		if len(outFiles) == 1 {
+			f.name = outFiles[0].Name
+			f.packagePath = outFiles[0].PackagePath
+			// In case of e.g. a .tar.gz, process the uncompressed archive by calling recursively
+			return f.processReader(outFiles[0].Source)
+		}
+		return outFiles, nil
 	}
 
-	return &finalFile{Source: outputFile, Name: f.name, PackagePath: f.packagePath}, err
+	return []*finalFile{{Source: outputFile, Name: f.name, PackagePath: f.packagePath}}, err
 }
 
 // processGz receives a tar.gz file and returns the
 // correct file for bin to download
-func (f *Filter) processGz(name string, r io.Reader) (*finalFile, error) {
+func (f *Filter) processGz(name string, r io.Reader) ([]*finalFile, error) {
 	gr, err := gzip.NewReader(r)
 	if err != nil {
 		return nil, err
 	}
 
-	return &finalFile{Source: gr, Name: gr.Name}, nil
+	return []*finalFile{{Source: gr, Name: gr.Name}}, nil
 }
 
-func (f *Filter) processTar(name string, r io.Reader) (*finalFile, error) {
+func (f *Filter) processTar(name string, r io.Reader) ([]*finalFile, error) {
 	tr := tar.NewReader(r)
-	tarFiles := map[string][]byte{}
-	if len(f.opts.PackagePath) > 0 {
-		log.Debugf("Processing tag with PackagePath %s\n", f.opts.PackagePath)
-	}
+	var executables []*finalFile
+	var otherRegularFiles []*Asset
+	fileContents := make(map[string][]byte)
+
 	for {
 		header, err := tr.Next()
 		if err == io.EOF {
 			break
 		} else if err != nil {
 			return nil, err
-		} else if header.FileInfo().IsDir() {
+		} else if header.FileInfo().IsDir() || header.Typeflag != tar.TypeReg {
 			continue
 		}
 
@@ -365,59 +368,67 @@ func (f *Filter) processTar(name string, r io.Reader) (*finalFile, error) {
 			continue
 		}
 
-		if header.Typeflag == tar.TypeReg {
-			// TODO we're basically reading all the files
-			// isn't there a way just to store the reference
-			// where this data is so we don't have to do this or
-			// re-scan the archive twice afterwards?
-			bs, err := io.ReadAll(tr)
-			if err != nil {
-				return nil, err
-			}
-			tarFiles[header.Name] = bs
+		bs, err := io.ReadAll(tr)
+		if err != nil {
+			return nil, err
+		}
+		fileContents[header.Name] = bs
+
+		kind, _ := filetype.Match(bs)
+		if isExecutable(kind) {
+			log.Debugf("Found executable in tar: %s", header.Name)
+			executables = append(executables, &finalFile{
+				Source:      bytes.NewReader(bs),
+				Name:        filepath.Base(header.Name),
+				PackagePath: header.Name,
+			})
+		} else if !isArchive(kind) {
+			otherRegularFiles = append(otherRegularFiles, &Asset{Name: header.Name})
 		}
 	}
-	if len(tarFiles) == 0 {
+
+	if len(executables) > 0 {
+		log.Debugf("Found %d executables, returning all of them.", len(executables))
+		return executables, nil
+	}
+
+	log.Debug("No executables found based on mimetype, falling back to asset filtering.")
+	if len(otherRegularFiles) == 0 {
 		return nil, fmt.Errorf("no files found in tar archive, use -p flag to manually select . PackagePath [%s]", f.opts.PackagePath)
 	}
 
-	as := make([]*Asset, 0)
-	for f := range tarFiles {
-		as = append(as, &Asset{Name: f, URL: ""})
-	}
-	choice, err := f.FilterAssets(name, as)
+	choice, err := f.FilterAssets(name, otherRegularFiles)
 	if err != nil {
 		return nil, err
 	}
 	selectedFile := choice.String()
 
-	tf := tarFiles[selectedFile]
+	tf := fileContents[selectedFile]
 
-	return &finalFile{Source: bytes.NewReader(tf), Name: filepath.Base(selectedFile), PackagePath: selectedFile}, nil
+	return []*finalFile{{Source: bytes.NewReader(tf), Name: filepath.Base(selectedFile), PackagePath: selectedFile}}, nil
 }
 
-func (f *Filter) processBz2(name string, r io.Reader) (*finalFile, error) {
+func (f *Filter) processBz2(name string, r io.Reader) ([]*finalFile, error) {
 	br := bzip2.NewReader(r)
 
-	return &finalFile{Source: br, Name: name}, nil
+	return []*finalFile{{Source: br, Name: name}}, nil
 }
 
-func (f *Filter) processXz(name string, r io.Reader) (*finalFile, error) {
+func (f *Filter) processXz(name string, r io.Reader) ([]*finalFile, error) {
 	xr, err := xz.NewReader(r, 0)
 	if err != nil {
 		return nil, err
 	}
 
-	return &finalFile{Source: xr, Name: name}, nil
+	return []*finalFile{{Source: xr, Name: name}}, nil
 }
 
-func (f *Filter) processZip(name string, r io.Reader) (*finalFile, error) {
+func (f *Filter) processZip(name string, r io.Reader) ([]*finalFile, error) {
 	zr := zipstream.NewReader(r)
+	var executables []*finalFile
+	var otherRegularFiles []*Asset
+	fileContents := make(map[string][]byte)
 
-	zipFiles := map[string][]byte{}
-	if len(f.opts.PackagePath) > 0 {
-		log.Debugf("Processing tag with PackagePath %s\n", f.opts.PackagePath)
-	}
 	for {
 		header, err := zr.Next()
 		if err == io.EOF {
@@ -432,44 +443,73 @@ func (f *Filter) processZip(name string, r io.Reader) (*finalFile, error) {
 			continue
 		}
 
-		// TODO we're basically reading all the files
-		// isn't there a way just to store the reference
-		// where this data is so we don't have to do this or
-		// re-scan the archive twice afterwards?
 		bs, err := io.ReadAll(zr)
 		if err != nil {
 			return nil, err
 		}
+		fileContents[header.Name] = bs
 
-		zipFiles[header.Name] = bs
+		kind, _ := filetype.Match(bs)
+		if isExecutable(kind) {
+			log.Debugf("Found executable in zip: %s", header.Name)
+			executables = append(executables, &finalFile{
+				Source:      bytes.NewReader(bs),
+				Name:        filepath.Base(header.Name),
+				PackagePath: header.Name,
+			})
+		} else if !isArchive(kind) {
+			otherRegularFiles = append(otherRegularFiles, &Asset{Name: header.Name})
+		}
 	}
-	if len(zipFiles) == 0 {
+
+	if len(executables) > 0 {
+		log.Debugf("Found %d executables, returning all of them.", len(executables))
+		return executables, nil
+	}
+
+	log.Debug("No executables found based on mimetype, falling back to asset filtering.")
+	if len(otherRegularFiles) == 0 {
 		return nil, fmt.Errorf("No files found in zip archive. PackagePath [%s]", f.opts.PackagePath)
 	}
 
-	as := make([]*Asset, 0)
-	for f := range zipFiles {
-		as = append(as, &Asset{Name: f, URL: ""})
-	}
-	choice, err := f.FilterAssets(name, as)
+	choice, err := f.FilterAssets(name, otherRegularFiles)
 	if err != nil {
 		return nil, err
 	}
 	selectedFile := choice.String()
 
-	fr := bytes.NewReader(zipFiles[selectedFile])
+	fr := bytes.NewReader(fileContents[selectedFile])
 
-	// return base of selected file since tar
-	// files usually have folders inside
-	return &finalFile{Name: filepath.Base(selectedFile), Source: fr, PackagePath: selectedFile}, nil
+	return []*finalFile{{Name: filepath.Base(selectedFile), Source: fr, PackagePath: selectedFile}}, nil
+}
+
+func isExecutable(kind types.Type) bool {
+	return kind.MIME.Value == "application/vnd.microsoft.portable-executable" ||
+		kind.MIME.Value == "application/x-elf" ||
+		kind.MIME.Value == "application/x-mach-binary"
+}
+
+func isArchive(kind types.Type) bool {
+	return kind == matchers.TypeGz ||
+		kind == matchers.TypeTar ||
+		kind == matchers.TypeXz ||
+		kind == matchers.TypeBz2 ||
+		kind == matchers.TypeZip
 }
 
 // isSupportedExt checks if this provider supports
 // dealing with this specific file extension
 func isSupportedExt(filename string) bool {
+	ext := strings.ToLower(filepath.Ext(filename))
+	switch ext {
+	case ".sha256", ".sha512", ".md5", ".sum", ".sig", ".asc":
+		log.Debugf("Filename %s is a checksum/signature file, skipping", filename)
+		return false
+	}
+
 	if ext := strings.TrimPrefix(filepath.Ext(filename), "."); len(ext) > 0 {
 		switch filetype.GetType(ext) {
-		case msiType, matchers.TypeDeb, matchers.TypeRpm, ascType:
+		case msiType, matchers.TypeDeb, matchers.TypeRpm:
 			log.Debugf("Filename %s doesn't have a supported extension", filename)
 			return false
 		case matchers.TypeGz, types.Unknown, matchers.TypeZip, matchers.TypeXz, matchers.TypeTar, matchers.TypeBz2, matchers.TypeExe:

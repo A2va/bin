@@ -50,7 +50,7 @@ func getGoPath() (string, error) {
 	return strings.TrimSpace(string(output)), nil
 }
 
-func (g *goinstall) Fetch(opts *FetchOpts) (*File, error) {
+func (g *goinstall) Fetch(opts *FetchOpts) ([]*File, error) {
 	goPath, err := getGoPath()
 	if err != nil {
 		return nil, err
@@ -89,11 +89,11 @@ func (g *goinstall) Fetch(opts *FetchOpts) (*File, error) {
 	// don't close and keep it for Data, bin is short lived CLI tool
 	// defer file.Close()
 
-	return &File{
+	return []*File{{
 		Data:    file,
 		Name:    g.name,
 		Version: g.tag,
-	}, nil
+	}}, nil
 }
 
 func (g *goinstall) GetLatestVersion() (string, string, error) {

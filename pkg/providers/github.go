@@ -23,7 +23,7 @@ type gitHub struct {
 	token  string
 }
 
-func (g *gitHub) Fetch(opts *FetchOpts) (*File, error) {
+func (g *gitHub) Fetch(opts *FetchOpts) ([]*File, error) {
 	var release *github.RepositoryRelease
 
 	// If we have a tag, let's fetch from there
@@ -64,7 +64,7 @@ func (g *gitHub) Fetch(opts *FetchOpts) (*File, error) {
 		gf.ExtraHeaders["Authorization"] = fmt.Sprintf("token %s", g.token)
 	}
 
-	outFile, err := f.ProcessURL(gf)
+	outFiles, err := f.ProcessURL(gf)
 	if err != nil {
 		return nil, err
 	}
@@ -74,9 +74,12 @@ func (g *gitHub) Fetch(opts *FetchOpts) (*File, error) {
 	// TODO calculate file hash. Not sure if we can / should do it here
 	// since we don't want to read the file unnecesarily. Additionally, sometimes
 	// releases have .sha256 files, so it'd be nice to check for those also
-	file := &File{Data: outFile.Source, Name: outFile.Name, Version: version, PackagePath: outFile.PackagePath}
+	var files []*File
+	for _, outFile := range outFiles {
+		files = append(files, &File{Data: outFile.Source, Name: outFile.Name, Version: version, PackagePath: outFile.PackagePath})
+	}
 
-	return file, nil
+	return files, nil
 }
 
 // GetLatestVersion checks the latest repo release and

@@ -17,7 +17,7 @@ type docker struct {
 	repo, tag string
 }
 
-func (d *docker) Fetch(opts *FetchOpts) (*File, error) {
+func (d *docker) Fetch(opts *FetchOpts) ([]*File, error) {
 	if len(opts.Version) > 0 {
 		// this is used by for the `ensure` command
 		d.tag = opts.Version
@@ -39,11 +39,12 @@ func (d *docker) Fetch(opts *FetchOpts) (*File, error) {
 		return nil, err
 	}
 
-	return &File{
-		Data:    strings.NewReader(fmt.Sprintf(sh, d.repo, d.tag)),
-		Name:    getImageName(d.repo),
-		Version: d.tag,
-	}, nil
+	return []*File{
+		{
+			Data:    strings.NewReader(fmt.Sprintf(sh, d.repo, d.tag)),
+			Name:    getImageName(d.repo),
+			Version: d.tag,
+		}}, nil
 }
 
 // TODO: missing implementation here
