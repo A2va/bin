@@ -45,10 +45,13 @@ func newInstallCmd() *installCmd {
 				resolvedPath = defaultPath
 			}
 
+			fetchOpts := map[string]any{
+				"All": root.opts.all,
+			}
+
 			// TODO check if binary already exists in config
 			// and triger the update process if that's the case
-
-			return pkg.DoInstall(u, root.opts.provider, resolvedPath, "", "", root.opts.force, root.opts.all)
+			return pkg.DoInstall(u, root.opts.provider, resolvedPath, fetchOpts, root.opts.force, root.opts.all)
 		},
 	}
 

@@ -7,6 +7,7 @@ import (
 	"github.com/caarlos0/log"
 	"github.com/fatih/color"
 	"github.com/hashicorp/go-version"
+	"github.com/marcosnils/bin/pkg"
 	"github.com/marcosnils/bin/pkg/config"
 	"github.com/marcosnils/bin/pkg/prompt"
 	"github.com/marcosnils/bin/pkg/providers"
@@ -121,29 +122,19 @@ func newUpdateCmd() *updateCmd {
 				}
 				log.Debugf("Using provider '%s' for '%s'", p.GetID(), ui.url)
 
-				pResult, err := p.Fetch(&providers.FetchOpts{All: root.opts.all, PackagePath: b.PackagePath, SkipPatchCheck: root.opts.skipPathCheck, PackageName: b.RemoteName})
+				fetchOpts := map[string]any{
+					"All":            root.opts.all,
+					"PackagePath":    b.PackagePath,
+					"SkipPatchCheck": root.opts.skipPathCheck,
+					"PackageName":    b.RemoteName,
+				}
+
+				err = pkg.DoInstall(ui.url, b.Provider, b.Path, fetchOpts, true, false)
 				if err != nil {
 					if root.opts.continueOnError {
 						updateFailures[b] = fmt.Errorf("Error while fetching %v: %w", ui.url, err)
 						continue
 					}
-					return err
-				}
-
-				hash, err := saveToDisk(pResult, b.Path, true)
-				if err != nil {
-					return fmt.Errorf("error installing binary: %w", err)
-				}
-
-				err = config.UpsertBinary(&config.Binary{
-					RemoteName:  pResult.Name,
-					Path:        b.Path,
-					Version:     pResult.Version,
-					Hash:        fmt.Sprintf("%x", hash),
-					URL:         ui.url,
-					PackagePath: pResult.PackagePath,
-				})
-				if err != nil {
 					return err
 				}
 

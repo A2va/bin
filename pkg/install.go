@@ -8,23 +8,25 @@ import (
 	"path/filepath"
 
 	"github.com/caarlos0/log"
+	"github.com/go-viper/mapstructure/v2"
 	"github.com/marcosnils/bin/pkg/assets"
 	"github.com/marcosnils/bin/pkg/config"
 	"github.com/marcosnils/bin/pkg/providers"
 )
 
-func DoInstall(u, provider, path, version, packagePath string, force, all bool) error {
+func DoInstall(u string, provider string, path string, fetchOptsFields map[string]any, force bool, all bool) error {
 	p, err := providers.New(u, provider)
 	if err != nil {
 		return err
 	}
 	log.Debugf("Using provider '%s' for '%s'", p.GetID(), u)
 
-	pResults, err := p.Fetch(&providers.FetchOpts{
-		All:         all,
-		Version:     version,
-		PackagePath: packagePath,
-	})
+	var fetchOpts providers.FetchOpts
+	if err := mapstructure.Decode(fetchOptsFields, &fetchOpts); err != nil {
+		panic(err)
+	}
+
+	pResults, err := p.Fetch(&fetchOpts)
 	if err != nil {
 		return err
 	}
@@ -120,8 +122,7 @@ func saveToDisk(f *providers.File, path string, overwrite bool) ([]byte, error) 
 	if overwrite {
 		extraFlags = 0
 		err := os.Remove(epath)
-		log.Debugf("Overwrite flag set, removing file %s
-", epath)
+		log.Debugf("Overwrite flag set, removing file %s", epath)
 		if err != nil && !os.IsNotExist(err) {
 			return nil, err
 		}

@@ -70,7 +70,11 @@ func newEnsureCmd() *ensureCmd {
 					continue
 				}
 
-				err = pkg.DoInstall(binCfg.URL, binCfg.Provider, binCfg.Path, binCfg.Version, binCfg.PackagePath, true, false)
+				fetchOpts := map[string]any{
+					"Version": binCfg.Version,
+				}
+
+				err = pkg.DoInstall(binCfg.URL, binCfg.Provider, binCfg.Path, fetchOpts, true, false)
 				if err != nil {
 					return err
 				}
